@@ -758,7 +758,7 @@ function GuestbookBody() {
           ★ Sign the guestbook ★
         </div>
         <div style={{ fontSize: 11, color: "var(--ink-soft)" }}>
-          Leave a note — it'll show up for everyone!
+          Leave a note and it'll show up for everyone!
         </div>
       </div>
       <div className="contact-form" style={{ padding: 0 }}>
