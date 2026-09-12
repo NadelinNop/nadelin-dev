@@ -19,6 +19,36 @@ const APPS = {
   computer: { title: "My Computer", icon: "computer", w: 520, h: 360 },
 };
 
+// ── Responsive window layout ────────────────────────────────────────────
+// App window sizes/positions were tuned for a desktop viewport. These
+// helpers keep windows on-screen and usable on phones/tablets too.
+const TASKBAR_H = 30;
+const WIN_MARGIN = 12;
+const MOBILE_BREAKPOINT = 700; // px — below this, windows open maximized
+
+function isNarrowViewport() {
+  return window.innerWidth <= MOBILE_BREAKPOINT;
+}
+
+// Shrink/reposition a window's requested rect so it always fits within the
+// current viewport (minus the taskbar + a small margin), instead of opening
+// wider/taller than the screen with no way to reach the rest of it.
+function fitToViewport(x, y, w, h) {
+  const maxW = Math.max(240, window.innerWidth - WIN_MARGIN * 2);
+  const maxH = Math.max(160, window.innerHeight - TASKBAR_H - WIN_MARGIN * 2);
+  const fw = Math.min(w, maxW);
+  const fh = Math.min(h, maxH);
+  const fx = Math.min(
+    Math.max(WIN_MARGIN, x),
+    window.innerWidth - fw - WIN_MARGIN,
+  );
+  const fy = Math.min(
+    Math.max(WIN_MARGIN, y),
+    window.innerHeight - TASKBAR_H - fh - WIN_MARGIN,
+  );
+  return { x: Math.max(WIN_MARGIN, fx), y: Math.max(WIN_MARGIN, fy), w: fw, h: fh };
+}
+
 function iconFor(name, size = 16) {
   const map = {
     person: <IconPerson size={size} />,
@@ -50,10 +80,13 @@ function Win({
   statusItems,
 }) {
   const titleRef = React.useRef(null);
+  // Pointer Events (not mouse-only) so dragging/resizing also works with touch —
+  // a plain mousedown/mousemove pair never fires during a touch drag gesture.
   const onTitleDown = (e) => {
     if (e.target.closest(".btn-titlebar")) return;
     if (winState.maximized) return;
     onFocus();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     const startX = e.clientX,
       startY = e.clientY;
     const sx = winState.x,
@@ -65,16 +98,17 @@ function Win({
       });
     };
     const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
     };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   };
   const onResizeDown = (e) => {
     if (winState.maximized) return;
     e.stopPropagation();
     onFocus();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     const startX = e.clientX,
       startY = e.clientY;
     const sw = winState.w,
@@ -86,11 +120,11 @@ function Win({
       });
     };
     const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
     };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   };
   const cls = `win ${winState.focused ? "focused" : ""} ${winState.minimized ? "minimized" : ""} ${winState.maximized ? "maximized" : ""}`;
   const geometry = winState.maximized
@@ -105,12 +139,12 @@ function Win({
     <div
       className={cls}
       style={{ ...geometry, zIndex: winState.z }}
-      onMouseDown={onFocus}
+      onPointerDown={onFocus}
     >
       <div
         className="win-title"
         ref={titleRef}
-        onMouseDown={onTitleDown}
+        onPointerDown={onTitleDown}
         onDoubleClick={onMax}
       >
         <span className="win-icon">{iconFor(winState.icon)}</span>
@@ -172,7 +206,7 @@ function Win({
         </div>
       )}
       {!winState.maximized && (
-        <div className="win-resize" onMouseDown={onResizeDown} />
+        <div className="win-resize" onPointerDown={onResizeDown} />
       )}
     </div>
   );
@@ -427,19 +461,33 @@ function App() {
     );
   }, []);
 
+  // Keep already-open windows on-screen if the viewport changes size later
+  // (browser resize, or rotating a phone/tablet) — they were only fitted to
+  // whatever viewport existed at the moment they opened.
+  React.useEffect(() => {
+    const onResize = () => {
+      setWindows((ws) =>
+        ws.map((w) => {
+          if (w.maximized) return w;
+          return { ...w, ...fitToViewport(w.x, w.y, w.w, w.h) };
+        }),
+      );
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   // Open the initial window once boot finishes. Just "About" (the "Hi, I'm
   // Nadelin Nop" intro), centered in the viewport — Projects no longer
   // auto-opens alongside it.
   React.useEffect(() => {
     if (!bootDone) return;
     if (windows.length === 0) {
-      const TASKBAR_H = 30;
-      const MARGIN = 20;
       const { w: aboutW, h: aboutH } = APPS.about;
-      const maxY = window.innerHeight - TASKBAR_H - MARGIN;
+      const maxY = window.innerHeight - TASKBAR_H - WIN_MARGIN;
 
-      const centerX = Math.max(MARGIN, (window.innerWidth - aboutW) / 2);
-      const centerY = Math.max(MARGIN, (maxY - aboutH) / 2);
+      const centerX = Math.max(WIN_MARGIN, (window.innerWidth - aboutW) / 2);
+      const centerY = Math.max(WIN_MARGIN, (maxY - aboutH) / 2);
 
       openWindow("about", { x: centerX, y: centerY });
     }
@@ -456,16 +504,22 @@ function App() {
         );
       }
       const meta = APPS[id];
+      const rawX = opts.x ?? 80 + ws.length * 32;
+      const rawY = opts.y ?? 60 + ws.length * 28;
+      const fitted = fitToViewport(rawX, rawY, meta.w, meta.h);
       const newWin = {
         id,
         title: meta.title,
         icon: meta.icon,
-        x: opts.x ?? 80 + ws.length * 32,
-        y: opts.y ?? 60 + ws.length * 28,
-        w: meta.w,
-        h: meta.h,
+        x: fitted.x,
+        y: fitted.y,
+        w: fitted.w,
+        h: fitted.h,
         focused: true,
         minimized: false,
+        // Dragging/resizing a desktop-sized window by hand doesn't work well
+        // on a phone, so open straight into fullscreen there instead.
+        maximized: isNarrowViewport(),
         z: nextZ(),
       };
       return [...ws.map((w) => ({ ...w, focused: false })), newWin];
@@ -641,20 +695,27 @@ function App() {
 // ── Desktop icon ────────────────────────────────────────────────────────
 function DIcon({ icon, label, onOpen }) {
   const [sel, setSel] = React.useState(false);
-  const onClick = (e) => {
+  const onDown = (e) => {
     e.stopPropagation();
+    // Touch has no natural "double-tap to open" affordance the way a mouse
+    // has double-click, so a single tap opens directly, like a phone home
+    // screen — mouse/pen still just selects, and needs a real double-click.
+    if (e.pointerType === "touch") {
+      onOpen();
+      return;
+    }
     setSel(true);
   };
   React.useEffect(() => {
     if (!sel) return;
     const h = () => setSel(false);
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
+    document.addEventListener("pointerdown", h);
+    return () => document.removeEventListener("pointerdown", h);
   }, [sel]);
   return (
     <div
       className={`dicon ${sel ? "selected" : ""}`}
-      onMouseDown={onClick}
+      onPointerDown={onDown}
       onDoubleClick={onOpen}
     >
       <span className="dicon-art">{iconFor(icon, 36)}</span>
