@@ -24,11 +24,6 @@ const APPS = {
 // helpers keep windows on-screen and usable on phones/tablets too.
 const TASKBAR_H = 30;
 const WIN_MARGIN = 12;
-const MOBILE_BREAKPOINT = 700; // px — below this, windows open maximized
-
-function isNarrowViewport() {
-  return window.innerWidth <= MOBILE_BREAKPOINT;
-}
 
 // Shrink/reposition a window's requested rect so it always fits within the
 // current viewport (minus the taskbar + a small margin), instead of opening
@@ -517,9 +512,7 @@ function App() {
         h: fitted.h,
         focused: true,
         minimized: false,
-        // Dragging/resizing a desktop-sized window by hand doesn't work well
-        // on a phone, so open straight into fullscreen there instead.
-        maximized: isNarrowViewport(),
+        maximized: false,
         z: nextZ(),
       };
       return [...ws.map((w) => ({ ...w, focused: false })), newWin];
